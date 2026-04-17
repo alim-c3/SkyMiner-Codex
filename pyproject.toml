@@ -1,0 +1,84 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "skyminer"
+version = "0.1.0"
+description = "AI astronomy discovery pipeline for candidate variable star and stellar anomaly detection using public TESS data."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "SkyMiner Contributors" },
+]
+keywords = ["astronomy", "variable-stars", "tess", "light-curves", "anomaly-detection"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "scikit-learn>=1.3",
+    "astropy>=6.0",
+    "pandas>=2.1",
+    "matplotlib>=3.8",
+    "jinja2>=3.1",
+    "typer>=0.12",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+live = [
+    "lightkurve>=2.4",
+    "astroquery>=0.4.6",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "pytest-mock>=3.12",
+]
+
+[project.scripts]
+skyminer = "skyminer.cli:app"
+
+[project.urls]
+Repository = "https://github.com/skyminer/skyminer"
+Issues = "https://github.com/skyminer/skyminer/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/skyminer"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/",
+    "config/",
+    "data/raw/sample_lightcurve.csv",
+    "README.md",
+    "pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.coverage.run]
+source = ["src/skyminer"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

@@ -1,0 +1,47 @@
+# Python bytecode and caches
+__pycache__/
+*.pyc
+*.pyo
+.ruff_cache/
+
+# Environment files (contain secrets / local overrides)
+.env
+.env.local
+
+# TESS light curve download cache (can be large)
+data/raw/tess_cache/
+
+# Pipeline outputs (regenerated on each run; keep the placeholder)
+outputs/
+!outputs/.gitkeep
+
+# SQLite databases
+*.sqlite
+*.db
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build and distribution artifacts
+dist/
+build/
+*.egg-info/
+
+# Test and coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Log files
+*.log
+
+# macOS metadata
+*.DS_Store
+
+# Editor and IDE directories
+.idea/
+.vscode/
+*.swp
+*.swo

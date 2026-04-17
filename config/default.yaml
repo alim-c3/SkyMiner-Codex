@@ -1,0 +1,114 @@
+# SkyMiner default configuration
+# All keys here are the canonical defaults. Override via environment variables:
+#   SKYMINER_CONFIG_PATH  — path to an alternate YAML config file
+#   SKYMINER_MODE         — "local" or "live"
+#   SKYMINER_DB_PATH      — path to the SQLite database file
+#   SKYMINER_LOG_LEVEL    — log verbosity
+
+# Pipeline operating mode: "local" (offline, uses CSV fixture) or "live" (MAST + catalog queries)
+mode: "local"
+
+paths:
+  # Root directory for raw and processed data files
+  data_dir: "data"
+  # Root directory for all pipeline output artifacts (reports, plots, candidates, logs)
+  outputs_dir: "outputs"
+  # Path to the SQLite database that persists pipeline runs and candidates
+  db_path: "outputs/skyminer.sqlite"
+
+logging:
+  # Log verbosity level: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+  # Log file name written under outputs_dir/logs/
+  file_name: "skyminer.log"
+
+tess:
+  # TESS mission identifier passed to lightkurve search queries
+  mission: "TESS"
+  # Pipeline author preference for light curve products; SPOC = Science Processing Operations Center
+  author: "SPOC"
+  # Cadence mode for light curve search: "long" (30-min FFI) or "short" (2-min target pixel)
+  cadence: "long"
+  # Local directory where lightkurve caches downloaded TESS data files
+  download_dir: "data/raw/tess_cache"
+  # Maximum number of light curves to keep per target when multiple sectors are available
+  max_lightcurves_per_target: 1
+
+pipeline:
+  # Number of targets processed together in one anomaly-detection batch
+  # IsolationForest requires batch_size >= 8; smaller batches fall back to z-score only
+  batch_size: 4
+  # Number of top-scoring candidates for which full reports (JSON + MD + PNG) are generated
+  top_k_reports: 5
+
+preprocessing:
+  smoothing:
+    # Whether to apply smoothing before feature extraction (reduces high-frequency noise)
+    enabled: true
+    # Smoothing algorithm: "savgol" (Savitzky-Golay) is the only supported method
+    method: "savgol"
+    # Window length for Savitzky-Golay filter; must be odd and > polyorder
+    window_length: 31
+    # Polynomial order for Savitzky-Golay filter
+    polyorder: 2
+  normalization:
+    # Flux normalization method applied after cleaning and smoothing:
+    #   "zscore"        — subtract mean, divide by std
+    #   "robust_zscore" — subtract median, divide by MAD (default; robust to outliers)
+    #   "none"          — no normalization
+    method: "robust_zscore"
+
+features:
+  # Time lags (in samples) at which autocorrelation is computed
+  autocorr_lags: [1, 2, 5, 10]
+  # Minimum relative prominence for scipy.signal.find_peaks when counting peaks and troughs
+  peak_prominence: 1.0
+  lomb_scargle:
+    # Minimum trial period in days for the Lomb-Scargle periodogram search
+    min_period_days: 0.05
+    # Maximum trial period in days; should not exceed roughly half the time baseline
+    max_period_days: 20.0
+    # Frequency grid oversampling factor; higher values give finer period resolution
+    samples_per_peak: 10
+
+detection:
+  anomaly:
+    # Whether to run IsolationForest in addition to z-score flagging
+    # Requires batch_size >= 8; automatically disabled for smaller batches
+    use_isolation_forest: true
+    # Z-score threshold above which individual features are flagged as anomalous
+    zscore_threshold: 2.5
+    isolation_forest:
+      # Number of isolation trees; higher values improve stability at the cost of speed
+      n_estimators: 200
+      # Expected fraction of outliers in the batch; influences the IF decision boundary
+      contamination: 0.1
+      # Random seed for reproducibility of IsolationForest results
+      random_state: 42
+  scoring:
+    weights:
+      # Weight for the anomaly sub-score (z-score / IF based)
+      anomaly: 0.45
+      # Weight for the periodicity sub-score (Lomb-Scargle quality)
+      periodicity: 0.30
+      # Weight for the variability sub-score (amplitude, std relative to noise)
+      variability: 0.20
+      # Weight for the novelty sub-score (derived from catalog validation status)
+      novelty: 0.05
+    # Candidates with total_score below this threshold are not included in reports
+    min_score_to_report: 0.2
+
+validation:
+  # Whether to run catalog cross-checks (requires network in live mode)
+  enabled: true
+  # Sky search radius in arcseconds used for SIMBAD and VizieR cone searches
+  radius_arcsec: 5.0
+  # VizieR catalog IDs to query; Gaia DR3 is the primary astrometric reference
+  vizier_catalogs:
+    - "I/355/gaiadr3"
+
+reporting:
+  # Whether to generate a Lomb-Scargle periodogram PNG for each candidate report
+  include_periodogram: true
+  # Maximum number of data points plotted in light curve figures (downsampled if exceeded)
+  max_points_plot: 5000
