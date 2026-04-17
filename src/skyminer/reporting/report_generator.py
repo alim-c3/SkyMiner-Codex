@@ -83,7 +83,13 @@ Generated at {generated_at}
 """
 
 
-def generate_reports(cfg: SkyMinerConfig, candidates: list[Candidate], *, top_k: int) -> None:
+def generate_reports(
+    cfg: SkyMinerConfig,
+    candidates: list[Candidate],
+    *,
+    top_k: int,
+    lightcurves_by_candidate_id: dict[str, LightCurve] | None = None,
+) -> dict[str, dict[str, str]]:
     outputs = cfg.paths.outputs_dir
     reports_dir = outputs / "reports"
     plots_dir = outputs / "plots"
@@ -97,13 +103,25 @@ def generate_reports(cfg: SkyMinerConfig, candidates: list[Candidate], *, top_k:
     # We don't currently persist full lightcurves per candidate in DB; for MVP,
     # report generation expects local-mode sample or uses minimal placeholders.
     # Pipeline runner can be extended to pass lightcurves here.
+    artifacts: dict[str, dict[str, str]] = {}
     for cand in selected:
-        _write_candidate_artifacts(cfg, cand, reports_dir=reports_dir, plots_dir=plots_dir)
+        lc = None
+        if lightcurves_by_candidate_id is not None:
+            lc = lightcurves_by_candidate_id.get(cand.candidate_id)
+        artifacts[cand.candidate_id] = _write_candidate_artifacts(
+            cfg, cand, reports_dir=reports_dir, plots_dir=plots_dir, lc=lc
+        )
+    return artifacts
 
 
 def _write_candidate_artifacts(
-    cfg: SkyMinerConfig, cand: Candidate, *, reports_dir: Path, plots_dir: Path
-) -> None:
+    cfg: SkyMinerConfig,
+    cand: Candidate,
+    *,
+    reports_dir: Path,
+    plots_dir: Path,
+    lc: LightCurve | None,
+) -> dict[str, str]:
     # JSON summary
     json_path = reports_dir / f"{_safe_name(cand.candidate_id)}.json"
     json_path.write_text(json.dumps(cand.model_dump(), indent=2, default=str), encoding="utf-8")
@@ -113,18 +131,21 @@ def _write_candidate_artifacts(
     md = _render_markdown(cand)
     md_path.write_text(md, encoding="utf-8")
 
-    # Plots: in MVP we may not have the full lightcurve at this stage; create placeholders if needed.
-    # In local mode, we can use the bundled sample.
-    try:
-        from skyminer.utils.io import read_csv_lightcurve
+    plot_lc = plots_dir / f"{_safe_name(cand.candidate_id)}_lightcurve.png"
+    plot_pg = plots_dir / f"{_safe_name(cand.candidate_id)}_periodogram.png"
+    if lc is not None:
+        try:
+            plot_lightcurve(cfg, lc, out_path=plot_lc)
+            plot_periodogram(cfg, lc, out_path=plot_pg)
+        except Exception:
+            pass
 
-        sample = cfg.paths.data_dir / "raw" / "sample_lightcurve.csv"
-        lc: LightCurve = read_csv_lightcurve(sample, target_id=cand.target_id)
-        plot_lightcurve(cfg, lc, out_path=plots_dir / f"{_safe_name(cand.candidate_id)}_lightcurve.png")
-        plot_periodogram(cfg, lc, out_path=plots_dir / f"{_safe_name(cand.candidate_id)}_periodogram.png")
-    except Exception:
-        # If plotting fails, we still have JSON+MD artifacts.
-        return
+    return {
+        "report_md": str(md_path),
+        "report_json": str(json_path),
+        "plot_lightcurve": str(plot_lc) if plot_lc.exists() else "",
+        "plot_periodogram": str(plot_pg) if plot_pg.exists() else "",
+    }
 
 
 def _safe_name(s: str) -> str:
