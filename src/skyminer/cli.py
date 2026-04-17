@@ -129,5 +129,9 @@ def _load_config(config_path: Path) -> SkyMinerConfig:
     cfg = SkyMinerConfig.load(config_path)
     repo_root = config_path.parent.parent if config_path.parts[-2:] == ("config", config_path.name) else Path.cwd()
     cfg = cfg.resolve_paths(repo_root=repo_root.resolve())
-    setup_logging(cfg.logging.level, cfg.paths.outputs_dir / "logs" / cfg.logging.file_name)
+    setup_logging(cfg, cfg.paths.outputs_dir)
     return cfg
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()
