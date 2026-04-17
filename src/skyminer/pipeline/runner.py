@@ -90,37 +90,36 @@ def run_pipeline(
             cfg, candidates, top_k=top_k, lightcurves_by_candidate_id=lightcurves_by_candidate_id
         )
 
-    # Always write a plain-English run summary when we have any candidates.
-    if candidates:
-        from skyminer.reporting.run_summary import CandidateArtifacts, write_run_summary
+    # Always write a plain-English run summary, even if ingestion failed or produced no candidates.
+    from skyminer.reporting.run_summary import CandidateArtifacts, write_run_summary
 
-        ranked_path = None
-        try:
-            ranked_path = outputs_dir / "candidates" / f"ranked_{run.run_id}.json"
-            if not ranked_path.exists():
-                ranked_path = None
-        except Exception:
+    ranked_path = None
+    try:
+        ranked_path = outputs_dir / "candidates" / f"ranked_{run.run_id}.json"
+        if not ranked_path.exists():
             ranked_path = None
+    except Exception:
+        ranked_path = None
 
-        artifact_objs: dict[str, CandidateArtifacts] = {}
-        for cid, a in (artifacts or {}).items():
-            artifact_objs[cid] = CandidateArtifacts(
-                candidate_id=cid,
-                report_md=Path(a["report_md"]) if a.get("report_md") else None,
-                report_json=Path(a["report_json"]) if a.get("report_json") else None,
-                plot_lightcurve=Path(a["plot_lightcurve"]) if a.get("plot_lightcurve") else None,
-                plot_periodogram=Path(a["plot_periodogram"]) if a.get("plot_periodogram") else None,
-            )
-
-        write_run_summary(
-            cfg,
-            run_id=run.run_id,
-            mode=mode,
-            targets_ingested=len(lightcurves),
-            candidates=candidates,
-            ranked_candidates_path=ranked_path,
-            artifacts=artifact_objs,
+    artifact_objs: dict[str, CandidateArtifacts] = {}
+    for cid, a in (artifacts or {}).items():
+        artifact_objs[cid] = CandidateArtifacts(
+            candidate_id=cid,
+            report_md=Path(a["report_md"]) if a.get("report_md") else None,
+            report_json=Path(a["report_json"]) if a.get("report_json") else None,
+            plot_lightcurve=Path(a["plot_lightcurve"]) if a.get("plot_lightcurve") else None,
+            plot_periodogram=Path(a["plot_periodogram"]) if a.get("plot_periodogram") else None,
         )
+
+    write_run_summary(
+        cfg,
+        run_id=run.run_id,
+        mode=mode,
+        targets_ingested=len(lightcurves),
+        candidates=candidates,
+        ranked_candidates_path=ranked_path,
+        artifacts=artifact_objs,
+    )
 
     return {
         "run_id": run.run_id,
@@ -194,7 +193,7 @@ def _detect_and_score(
             log.exception("Feature extraction failed for %s: %s", lc.target_id, exc)
 
     if not prepped:
-        return []
+        return [], {}
 
     anomaly_bundle = compute_anomaly(feature_rows, cfg)
     for idx, (lc, feats, per) in enumerate(prepped):

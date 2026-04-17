@@ -90,14 +90,31 @@ class CatalogValidator:
             return {"matched": False}
 
         row = res[0]
-        main_id = str(row["MAIN_ID"]).strip()
-        otype = str(row["OTYPE"]).strip() if "OTYPE" in row.colnames else None
+        colnames = list(getattr(res, "colnames", []) or [])
+        lower_map = {c.lower(): c for c in colnames}
+
+        # astroquery/SIMBAD column names can vary by version and are often lower-case.
+        main_id_col = lower_map.get("main_id") or lower_map.get("mainid") or lower_map.get("id")
+        otype_col = lower_map.get("otype")
+        ra_col = lower_map.get("ra")
+        dec_col = lower_map.get("dec")
+
+        main_id = str(row[main_id_col]).strip() if main_id_col else None
+        otype = str(row[otype_col]).strip() if otype_col else None
+
+        sep_arcsec = None
+        try:
+            if ra_col and dec_col:
+                match_coord = SkyCoord(float(row[ra_col]) * u.deg, float(row[dec_col]) * u.deg, frame="icrs")
+                sep_arcsec = float(coord.separation(match_coord).arcsec)
+        except Exception:
+            sep_arcsec = None
+
         return {
-            "matched": True,
+            "matched": bool(main_id),
             "main_id": main_id,
             "otype": otype,
-            # SIMBAD query_region doesn't directly provide separation; keep None for now.
-            "separation_arcsec": None,
+            "separation_arcsec": sep_arcsec,
         }
 
     def _query_vizier(self, candidate: Candidate) -> dict[str, Any] | None:

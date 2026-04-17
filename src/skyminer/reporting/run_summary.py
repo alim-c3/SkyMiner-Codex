@@ -59,11 +59,11 @@ def write_run_summary(
     reports_dir = cfg.paths.outputs_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    md_path = reports_dir / f"run_summary_{run_id}.md"
+    html_path = reports_dir / f"run_summary_{run_id}.html"
     json_path = reports_dir / f"run_summary_{run_id}.json"
 
-    md_path.write_text(
-        _render_markdown(
+    html_path.write_text(
+        _render_html(
             cfg,
             run_id=run_id,
             mode=mode,
@@ -78,7 +78,7 @@ def write_run_summary(
         encoding="utf-8",
     )
     json_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
-    return md_path
+    return html_path
 
 
 def _candidate_summary(c: Candidate) -> dict[str, Any]:
@@ -115,6 +115,29 @@ def _why_interesting_short(c: Candidate) -> str:
     return "; ".join(reasons)
 
 
+def _why_not_interesting_short(c: Candidate, *, min_score: float) -> str:
+    """Layperson-friendly short reason for why this candidate did not make the cut."""
+
+    bits: list[str] = []
+    score = float(c.score.total) if c.score else 0.0
+    bits.append(f"below threshold (score {score:.3f} < {min_score:.3f})")
+
+    amp = float(c.features.get("amplitude_p95_p5", 0.0) or 0.0)
+    if amp < 1.0:
+        bits.append("low-to-moderate variability")
+
+    if not c.periodicity.dominant_period_days or c.periodicity.quality < 0.6:
+        bits.append("no strong repeating cycle detected")
+
+    z = float(c.anomaly.get("zscore_score", 0.0) or 0.0)
+    if z < 1.0:
+        bits.append("not a strong outlier versus this batch")
+
+    if c.validation.status == "known":
+        bits.append("catalog match suggests it is already known")
+
+    return "; ".join(bits)
+
 def _novelty_likelihood(c: Candidate) -> dict[str, Any]:
     """Conservative heuristic only. Not a scientific probability."""
 
@@ -146,7 +169,7 @@ def _novelty_likelihood(c: Candidate) -> dict[str, Any]:
     }
 
 
-def _render_markdown(
+def _render_html(
     cfg: SkyMinerConfig,
     *,
     run_id: str,
@@ -161,86 +184,150 @@ def _render_markdown(
 ) -> str:
     min_score = float(cfg.detection.scoring.min_score_to_report)
     generated_at = datetime.now(timezone.utc).isoformat()
+    scored = [c for c in candidates if c.score is not None]
+
+    def file_link(p: Path | None, label: str) -> str:
+        if p is None:
+            return f"<span class='na'>{label}: N/A</span>"
+        try:
+            uri = p.resolve().as_uri()
+        except Exception:
+            uri = str(p)
+        return f"<a href='{uri}' target='_blank' rel='noopener noreferrer'>{label}</a>"
+
+    def img_tag(p: Path | None, alt: str) -> str:
+        if p is None:
+            return ""
+        try:
+            uri = p.resolve().as_uri()
+        except Exception:
+            uri = str(p)
+        return f"<div class='imgwrap'><img src='{uri}' alt='{alt}' /></div>"
 
     def art_lines(cid: str) -> str:
         a = artifacts.get(cid)
         if a is None:
-            return "- Artifacts: not found\n"
-        lines = [
-            f"- Report (MD): `{a.report_md}`" if a.report_md else "- Report (MD): N/A",
-            f"- Report (JSON): `{a.report_json}`" if a.report_json else "- Report (JSON): N/A",
+            return "<div class='artifacts'><span class='na'>Artifacts: not found</span></div>"
+        parts = [
+            file_link(a.report_md, "Candidate report (HTML/MD)"),
+            file_link(a.report_json, "Candidate JSON"),
+            file_link(a.plot_lightcurve, "Light curve plot (PNG)") if a.plot_lightcurve else "<span class='na'>Light curve plot: N/A</span>",
+            file_link(a.plot_periodogram, "Periodogram plot (PNG)") if a.plot_periodogram else "<span class='na'>Periodogram plot: N/A</span>",
         ]
-        if a.plot_lightcurve is not None:
-            lines.append(f"- Plot (light curve): `{a.plot_lightcurve}`")
-        if a.plot_periodogram is not None:
-            lines.append(f"- Plot (periodogram): `{a.plot_periodogram}`")
-        return "\n".join(lines) + "\n"
+        imgs = img_tag(a.plot_lightcurve, "Light curve plot") + img_tag(a.plot_periodogram, "Periodogram plot")
+        return "<div class='artifacts'>" + " | ".join(parts) + "</div>" + imgs
 
     def candidate_block(c: Candidate) -> str:
-        score = c.score.total if c.score else None
+        score = float(c.score.total) if c.score else None
         novelty = _novelty_likelihood(c)
         why = _why_interesting_short(c)
         next_steps = _next_steps(c, mode=mode)
-        return (
-            f"### {c.candidate_id}\n\n"
-            f"- Score (0..1): `{score:.3f}`\n"
-            f"- Validation: `{c.validation.status}`\n"
-            f"- Why it stood out: {why}\n"
-            f"- Novelty likelihood (conservative): **{novelty['label']}** (heuristic {novelty['heuristic_score_0_to_1']})\n"
-            f"{art_lines(c.candidate_id)}\n"
-            f"**How to read the plots (layperson-friendly):**\n"
-            f"- Light curve: the line shows how brightness changes over time. Big repeating up/down patterns often mean a variable star.\n"
-            f"- Periodogram: the tallest peak suggests a repeating cycle length (period). A clear peak supports periodic variability.\n\n"
-            f"**Next steps:**\n"
-            f"{next_steps}\n"
-        )
+        return f"""
+        <section class="candidate">
+          <h3>{c.candidate_id}</h3>
+          <ul>
+            <li><b>Score (0..1):</b> {f"{score:.3f}" if score is not None else "N/A"}</li>
+            <li><b>Validation:</b> <code>{c.validation.status}</code></li>
+            <li><b>Why it stood out:</b> {why}</li>
+            <li><b>Novelty likelihood (conservative):</b> <b>{novelty['label']}</b> (heuristic {novelty['heuristic_score_0_to_1']})</li>
+          </ul>
+          {art_lines(c.candidate_id)}
+          <details>
+            <summary><b>How to read the plots (layperson-friendly)</b></summary>
+            <p><b>Light curve:</b> this is a brightness-over-time line. If it goes up and down in a repeating way, that often means a variable star.</p>
+            <p><b>Periodogram:</b> this chart searches for repeating cycles. A tall peak suggests a likely cycle length (period). A clearer peak usually means a more reliable repeating signal.</p>
+          </details>
+          <details open>
+            <summary><b>Next steps</b></summary>
+            <ul>
+              {''.join(f'<li>{s[2:]}</li>' for s in next_steps.splitlines() if s.startswith('- '))}
+            </ul>
+          </details>
+        </section>
+        """
 
     ranked_line = f"`{ranked_candidates_path}`" if ranked_candidates_path else "N/A"
 
-    md = [
-        "# SkyMiner Run Summary",
-        "",
-        f"- Run ID: `{run_id}`",
-        f"- Mode: `{mode}`",
-        f"- Data analyzed: `{targets_ingested}` ingested target(s), `{len(candidates)}` candidate object(s)",
-        f"- Interesting threshold: score >= `{min_score}`",
-        f"- Ranked candidates JSON: {ranked_line}",
-        f"- Generated at (UTC): `{generated_at}`",
-        "",
-        "## Results",
-        "",
-        f"- Interesting: `{len(interesting)}`",
-        f"- Not interesting (rejected): `{len(rejected)}`",
-        f"- Unscored (errors/insufficient data): `{len(unscored)}`",
-        "",
-        "## Not Interesting (Rejected)",
-        "",
-    ]
-
-    if not rejected:
-        md.append("_None in this run._")
-    else:
-        for c in rejected:
-            md.append(f"- `{c.candidate_id}` (score {c.score.total:.3f})")
-
-    md.extend(["", "## Interesting Candidates", ""])
-    if not interesting:
-        md.append("_None met the interesting threshold in this run._")
-    else:
-        for c in interesting:
-            md.append(candidate_block(c))
-
-    md.extend(
-        [
-            "",
-            "## Notes and Cautions",
-            "",
-            "- SkyMiner produces **candidates**, not confirmed discoveries.",
-            "- Catalog checks can miss matches due to coordinate uncertainty, proper motion, or catalog incompleteness.",
-            "- A \"no match\" result means only: no obvious match found in the catalogs queried by this run.",
-        ]
+    ranked_href = ranked_candidates_path.resolve().as_uri() if ranked_candidates_path else ""
+    rejected_items = (
+        "".join(
+            f"<li><code>{c.candidate_id}</code> — {_why_not_interesting_short(c, min_score=min_score)}</li>"
+            for c in rejected
+        )
+        if rejected
+        else "<li>None in this run.</li>"
     )
-    return "\n".join(md).strip() + "\n"
+    interesting_blocks = (
+        "".join(candidate_block(c) for c in interesting)
+        if interesting
+        else "<p>None met the interesting threshold in this run.</p>"
+    )
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SkyMiner Run Summary {run_id}</title>
+  <style>
+    body {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color: #111; }}
+    code {{ background: #f4f4f6; padding: 1px 4px; border-radius: 4px; }}
+    .meta {{ background: #f7fafc; border: 1px solid #e2e8f0; padding: 12px 14px; border-radius: 10px; }}
+    .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
+    .kpi {{ background: #fff; border: 1px solid #e5e7eb; padding: 10px 12px; border-radius: 10px; }}
+    .candidate {{ border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px; margin: 14px 0; }}
+    .artifacts {{ margin: 8px 0; font-size: 0.95em; }}
+    .imgwrap img {{ max-width: 100%; height: auto; border: 1px solid #e5e7eb; border-radius: 10px; margin: 8px 0; }}
+    .na {{ color: #6b7280; }}
+    details {{ margin-top: 8px; }}
+    @media (max-width: 900px) {{ .grid {{ grid-template-columns: 1fr; }} }}
+  </style>
+</head>
+<body>
+  <h1>SkyMiner Run Summary</h1>
+  <div class="meta">
+    <div><b>Run ID:</b> <code>{run_id}</code></div>
+    <div><b>Mode:</b> <code>{mode}</code></div>
+    <div><b>Generated at (UTC):</b> <code>{generated_at}</code></div>
+    <div><b>Ranked candidates JSON:</b> {f"<a href='{ranked_href}'>open</a>" if ranked_href else "N/A"}</div>
+  </div>
+
+  <h2>What happened (plain English)</h2>
+  <p>
+    SkyMiner downloaded/loaded <b>{targets_ingested}</b> piece(s) of time-series data (light curves) and analyzed them for
+    <b>variability</b> (brightness changing over time), <b>periodicity</b> (repeating patterns), and <b>anomaly signals</b>
+    (unusual behavior compared to the rest of the batch). It then tried to cross-check against public catalogs when possible.
+  </p>
+
+  <div class="grid">
+    <div class="kpi"><b>Targets ingested</b><div>{targets_ingested}</div></div>
+    <div class="kpi"><b>Candidates scored</b><div>{len(scored)}</div></div>
+    <div class="kpi"><b>Interesting</b><div>{len(interesting)}</div></div>
+    <div class="kpi"><b>Rejected</b><div>{len(rejected)}</div></div>
+  </div>
+
+  <h2>Not interesting (rejected)</h2>
+  <p>Rejected means the candidate scored below the configured interesting threshold (score &lt; {min_score}).</p>
+  <ul>
+    {rejected_items}
+  </ul>
+
+  <h2>Interesting candidates</h2>
+  <p>
+    "Interesting" means: score &ge; {min_score}. This is a prioritization rule, not a scientific confirmation.
+    If a candidate is marked "no match" in catalogs, that only means "no obvious match found" in the catalogs queried by this run.
+  </p>
+  {interesting_blocks}
+
+  <h2>Notes and cautions</h2>
+  <ul>
+    <li>SkyMiner outputs are <b>candidates</b>, not confirmed discoveries.</li>
+    <li>Catalog checks can miss matches due to coordinate uncertainty, proper motion, or catalog incompleteness.</li>
+    <li>A "no match" result is <b>not proof</b> something is new; it is only a signal to prioritize follow-up.</li>
+  </ul>
+</body>
+</html>
+"""
 
 
 def _next_steps(c: Candidate, *, mode: str) -> str:
