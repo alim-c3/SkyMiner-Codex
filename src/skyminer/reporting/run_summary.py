@@ -251,7 +251,7 @@ def _render_html(
     ranked_href = ranked_candidates_path.resolve().as_uri() if ranked_candidates_path else ""
     rejected_items = (
         "".join(
-            f"<li><code>{c.candidate_id}</code> — {_why_not_interesting_short(c, min_score=min_score)}</li>"
+            f"<li><code>{c.candidate_id}</code> - {_why_not_interesting_short(c, min_score=min_score)}</li>"
             for c in rejected
         )
         if rejected
