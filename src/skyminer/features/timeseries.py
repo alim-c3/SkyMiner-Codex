@@ -75,6 +75,39 @@ def _lomb_scargle_dominant(
     except Exception:
         return None, None
 
+    if len(t) < 15:
+        return None, None
+
+    t = np.asarray(t, dtype=float)
+    y = np.asarray(y, dtype=float)
+    t_span = float(np.max(t) - np.min(t))
+    if not np.isfinite(t_span) or t_span <= 0:
+        return None, None
+
+    min_p = float(cfg.features.lomb_scargle.min_period_days)
+    max_p = float(cfg.features.lomb_scargle.max_period_days)
+    if max_p <= min_p:
+        max_p = min_p * 10
+
+    min_f = 1.0 / max_p
+    max_f = 1.0 / min_p
+    try:
+        freq, power = LombScargle(t, y).autopower(
+            minimum_frequency=min_f,
+            maximum_frequency=max_f,
+            samples_per_peak=int(cfg.features.lomb_scargle.samples_per_peak),
+        )
+        if len(power) == 0:
+            return None, None
+        idx = int(np.nanargmax(power))
+        best_f = float(freq[idx])
+        if best_f <= 0:
+            return None, None
+        best_p = 1.0 / best_f
+        return best_p, float(power[idx])
+    except Exception:
+        return None, None
+
 
 def _skew(y: np.ndarray) -> float:
     y = np.asarray(y, dtype=float)
@@ -115,36 +148,3 @@ def _peak_trough_counts(y: np.ndarray, *, prominence: float) -> tuple[float, flo
         peaks = int(np.sum(switches < 0))
         troughs = int(np.sum(switches > 0))
         return float(peaks), float(troughs)
-
-    if len(t) < 15:
-        return None, None
-
-    t = np.asarray(t, dtype=float)
-    y = np.asarray(y, dtype=float)
-    t_span = float(np.max(t) - np.min(t))
-    if not np.isfinite(t_span) or t_span <= 0:
-        return None, None
-
-    min_p = float(cfg.features.lomb_scargle.min_period_days)
-    max_p = float(cfg.features.lomb_scargle.max_period_days)
-    if max_p <= min_p:
-        max_p = min_p * 10
-
-    min_f = 1.0 / max_p
-    max_f = 1.0 / min_p
-    try:
-        freq, power = LombScargle(t, y).autopower(
-            minimum_frequency=min_f,
-            maximum_frequency=max_f,
-            samples_per_peak=int(cfg.features.lomb_scargle.samples_per_peak),
-        )
-        if len(power) == 0:
-            return None, None
-        idx = int(np.nanargmax(power))
-        best_f = float(freq[idx])
-        if best_f <= 0:
-            return None, None
-        best_p = 1.0 / best_f
-        return best_p, float(power[idx])
-    except Exception:
-        return None, None

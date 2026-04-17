@@ -11,8 +11,9 @@ def test_cleaning_sorts_and_removes_nans() -> None:
     lc = LightCurve(
         source="local_sample",
         target_id="X",
-        time=[2.0, 1.0, 3.0, float("nan"), 4.0, 5.0],
-        flux=[1.0, 2.0, 3.0, 9.0, float("nan"), 5.0],
+        # Keep >= 5 finite points after dropping NaNs.
+        time=[2.0, 1.0, 3.0, float("nan"), 4.0, 5.0, 6.0],
+        flux=[1.0, 2.0, 3.0, 9.0, float("nan"), 5.0, 6.0],
         flux_err=None,
     )
     cleaned = clean_lightcurve(lc, cfg)
@@ -29,4 +30,3 @@ def test_normalization_robust_zscore_has_median_zeroish() -> None:
     normed = normalize_lightcurve(cleaned, cfg)
     _, y, _ = normed.as_arrays()
     assert abs(float(np.median(y))) < 1e-6
-

@@ -18,7 +18,7 @@ def test_anomaly_zscore_flags_outlier_row() -> None:
 def test_scoring_combines_components() -> None:
     cfg = SkyMinerConfig()
     cand = Candidate(
-        candidate_id="a",
+        candidate_id=Candidate.build_id("local_sample", "t"),
         target_id="t",
         source="local_sample",
         features={"amplitude_p95_p5": 3.0},
@@ -29,4 +29,3 @@ def test_scoring_combines_components() -> None:
     s = score_candidate(cand, cfg)
     assert 0.0 <= s.total <= 1.0
     assert s.total > 0.2
-

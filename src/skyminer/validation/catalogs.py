@@ -135,8 +135,10 @@ def _safe_cell(v: Any) -> Any:
 def _status_from_otype(otype: str | None) -> str:
     if not otype:
         return "known_unclear"
-    o = otype.lower()
-    if "var" in o or "variable" in o:
+    o = otype.strip()
+    ol = o.lower()
+    # SIMBAD uses compact codes like "V*" for variable stars.
+    if o.upper().startswith("V") or o.upper() == "V*" or "var" in ol or "variable" in ol:
         return "known_classified"
     # Many SIMBAD types are terse; treat unknown strings conservatively.
     return "known_unclear"
@@ -153,4 +155,3 @@ class VSXValidatorPlaceholder:
 
     def validate(self, candidate: Candidate) -> ValidationResult:
         return ValidationResult(status="unknown", details={"reason": "vsx not implemented"})
-
