@@ -112,3 +112,9 @@ reporting:
   include_periodogram: true
   # Maximum number of data points plotted in light curve figures (downsampled if exceeded)
   max_points_plot: 5000
+
+recent_mast:
+  # Operational definition of "last night": last N hours in UTC for MAST queries.
+  hours: 24
+  # Safety cap for how many TIC IDs we will attempt to ingest in one "last night" run.
+  max_tic_ids: 500

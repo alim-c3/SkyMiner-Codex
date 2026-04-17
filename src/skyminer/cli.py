@@ -42,6 +42,19 @@ def main(argv: list[str] | None = None) -> None:
     p_rep.add_argument("--mode", default=None)
     p_rep.add_argument("--max-targets", type=int, default=3)
 
+    p_last = sub.add_parser(
+        "run-last-night",
+        help="Live run using 'last night' MAST window: discover recent TESS time-series products and analyze them.",
+    )
+    p_last.add_argument("--hours", type=int, default=None, help="Lookback window in hours (UTC). Default from config.")
+    p_last.add_argument(
+        "--max-tics",
+        type=int,
+        default=None,
+        help="Max TIC IDs to ingest (safety cap). Default from config.",
+    )
+    p_last.add_argument("--max-targets", type=int, default=None, help="Max targets to ingest (alias for max-tics).")
+
     args = parser.parse_args(argv)
     cfg = _load_config(Path(args.config))
 
@@ -50,7 +63,7 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(res, indent=2, default=str))
         return
 
-    mode = (args.mode or cfg.mode).strip()
+    mode = (getattr(args, "mode", None) or cfg.mode).strip()
     if args.cmd == "run-pipeline":
         coords = list(zip(args.ra, args.dec)) if args.ra and args.dec and len(args.ra) == len(args.dec) else None
         res = run_pipeline(
@@ -122,6 +135,31 @@ def main(argv: list[str] | None = None) -> None:
             persist=True,
         )
         print(json.dumps(res, indent=2, default=str))
+        return
+
+    if args.cmd == "run-last-night":
+        from skyminer.ingestion.mast_recent import fetch_recent_tic_ids
+
+        hours = int(args.hours) if args.hours is not None else int(cfg.recent_mast.hours)
+        max_tics = (
+            int(args.max_targets)
+            if args.max_targets is not None
+            else int(args.max_tics) if args.max_tics is not None else int(cfg.recent_mast.max_tic_ids)
+        )
+
+        recent = fetch_recent_tic_ids(cfg, hours=hours, max_tics=max_tics)
+        res = run_pipeline(
+            cfg,
+            mode="live",
+            # Important: pass an explicit list (even empty) so live mode does not fall back to default TIC IDs.
+            tic_ids=recent.tic_ids,
+            coords=None,
+            max_targets=len(recent.tic_ids),
+            validate=cfg.validation.enabled,
+        )
+        # Include the discovery window in stdout for convenience.
+        payload = {"recent_window": recent.__dict__, "pipeline": res}
+        print(json.dumps(payload, indent=2, default=str))
         return
 
 

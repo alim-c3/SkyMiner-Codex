@@ -149,12 +149,12 @@ def _ingest(
     ingestor = TessIngestor(cfg)
     results: list[LightCurve] = []
 
-    if tic_ids:
+    if tic_ids is not None:
         for tic in tic_ids[:max_targets]:
             results.extend(ingestor.ingest_tic_ids([tic]))
         return results
 
-    if coords:
+    if coords is not None:
         coords = coords[:max_targets]
         results.extend(ingestor.ingest_coordinates(coords))
         return results

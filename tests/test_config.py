@@ -1,10 +1,14 @@
 from pathlib import Path
+import uuid
 
 from skyminer.config import SkyMinerConfig
 
 
-def test_load_config(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "cfg.yaml"
+def test_load_config() -> None:
+    # Avoid pytest tmpdir machinery (blocked in this environment); write under the user profile instead.
+    scratch = Path.home() / "skyminer_test_tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    cfg_path = scratch / f"cfg_{uuid.uuid4().hex}.yaml"
     cfg_path.write_text(
         """
 mode: local
@@ -20,4 +24,3 @@ logging:
     cfg = SkyMinerConfig.load(cfg_path)
     assert cfg.mode == "local"
     assert cfg.logging.level == "DEBUG"
-

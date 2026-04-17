@@ -104,6 +104,13 @@ class ReportingConfig(BaseModel):
     max_points_plot: int = 5000
 
 
+class RecentMASTConfig(BaseModel):
+    # Operational definition of "last night": last N hours in UTC for MAST queries.
+    hours: int = 24
+    # Safety cap to avoid accidentally trying to ingest tens of thousands of targets at once.
+    max_tic_ids: int = 500
+
+
 class SkyMinerConfig(BaseModel):
     mode: Literal["local", "live"] = "local"
 
@@ -116,6 +123,7 @@ class SkyMinerConfig(BaseModel):
     detection: DetectionConfig = Field(default_factory=DetectionConfig)
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
+    recent_mast: RecentMASTConfig = Field(default_factory=RecentMASTConfig)
 
     @classmethod
     def load(cls, path: Path) -> "SkyMinerConfig":
@@ -246,4 +254,3 @@ def _parse_scalar(s: str) -> Any:
         parts = [p.strip() for p in inner.split(",")]
         return [_parse_scalar(p) for p in parts]
     return s
-
