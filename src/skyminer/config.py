@@ -29,6 +29,15 @@ class TessConfig(BaseModel):
     cadence: str = "long"
     download_dir: Path = Path("data/raw/tess_cache")
     max_lightcurves_per_target: int = 1
+    ingestion_mode: Literal["spoc", "tesscut", "spoc_then_tesscut"] = "spoc"
+
+    # Tesscut (FFI cutout photometry) settings. Used when ingestion_mode includes tesscut.
+    tesscut_cutout_size: int = 10  # pixels (square cutout)
+    tesscut_threshold_sigma: float = 3.0
+    tesscut_quality_bitmask: str = "default"
+
+    # Parallelism for live ingestion (network-bound).
+    max_workers: int = 8
 
 
 class PipelineConfig(BaseModel):
@@ -102,6 +111,9 @@ class ValidationConfig(BaseModel):
 class ReportingConfig(BaseModel):
     include_periodogram: bool = True
     max_points_plot: int = 5000
+    # Keep HTML run summaries readable on large batches.
+    run_summary_max_interesting: int = 25
+    run_summary_max_rejected: int = 50
 
 
 class RecentMASTConfig(BaseModel):
@@ -109,6 +121,19 @@ class RecentMASTConfig(BaseModel):
     hours: int = 24
     # Safety cap to avoid accidentally trying to ingest tens of thousands of targets at once.
     max_tic_ids: int = 500
+
+
+class PublicSampleConfig(BaseModel):
+    # How many TIC targets to sample for "public sample" runs.
+    n_targets: int = 200
+    # Deterministic seed for reproducibility.
+    seed: int = 42
+    # Only consider TIC entries with TESS magnitude <= this value when available.
+    tmag_max: float = 12.0
+    # Cone-search radius (degrees) for each randomly generated sky point.
+    cone_radius_deg: float = 0.35
+    # Upper bound on how many random sky points we will query to reach n_targets.
+    max_query_points: int = 2000
 
 
 class SkyMinerConfig(BaseModel):
@@ -124,6 +149,7 @@ class SkyMinerConfig(BaseModel):
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
     recent_mast: RecentMASTConfig = Field(default_factory=RecentMASTConfig)
+    public_sample: PublicSampleConfig = Field(default_factory=PublicSampleConfig)
 
     @classmethod
     def load(cls, path: Path) -> "SkyMinerConfig":

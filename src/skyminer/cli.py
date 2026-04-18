@@ -55,6 +55,41 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_last.add_argument("--max-targets", type=int, default=None, help="Max targets to ingest (alias for max-tics).")
 
+    p_pub = sub.add_parser(
+        "run-public-sample",
+        help="Live run over a reproducible public TIC sample (MAST TIC catalog) and score/rank candidates.",
+    )
+    p_pub.add_argument("--n", type=int, default=None, help="Number of TIC targets to sample.")
+    p_pub.add_argument("--seed", type=int, default=None, help="Sampling seed.")
+    p_pub.add_argument("--tmag-max", type=float, default=None, help="TESS magnitude max filter (when present).")
+    p_pub.add_argument("--cone-radius-deg", type=float, default=None, help="Cone radius per random sky point (deg).")
+    p_pub.add_argument("--max-query-points", type=int, default=None, help="Max random sky points to query.")
+    p_pub.add_argument(
+        "--tess-ingestion-mode",
+        choices=["spoc", "tesscut", "spoc_then_tesscut"],
+        default=None,
+        help="Override TESS ingestion mode for this run.",
+    )
+
+    p_spoc = sub.add_parser(
+        "run-tess-product-sample",
+        help="Live run over a reproducible sample of TIC IDs that already have SPOC light curve products.",
+    )
+    p_spoc.add_argument("--n", type=int, default=200, help="How many ingestible TIC IDs to collect.")
+    p_spoc.add_argument("--seed", type=int, default=42, help="Sampling seed.")
+    p_spoc.add_argument("--max-queries", type=int, default=3000, help="Max random MAST queries while sampling.")
+    p_spoc.add_argument(
+        "--validate",
+        action="store_true",
+        help="Enable SIMBAD/VizieR validation for every candidate (slower). Default is off for harvesting.",
+    )
+    p_spoc.add_argument(
+        "--top-k-reports",
+        type=int,
+        default=20,
+        help="How many top candidates to generate plots/reports for. Set 0 to disable.",
+    )
+
     args = parser.parse_args(argv)
     cfg = _load_config(Path(args.config))
 
@@ -159,6 +194,77 @@ def main(argv: list[str] | None = None) -> None:
         )
         # Include the discovery window in stdout for convenience.
         payload = {"recent_window": recent.__dict__, "pipeline": res}
+        print(json.dumps(payload, indent=2, default=str))
+        return
+
+    if args.cmd == "run-public-sample":
+        from skyminer.ingestion.tic_catalog import load_or_create_tic_sample
+
+        n = int(args.n) if args.n is not None else int(cfg.public_sample.n_targets)
+        seed = int(args.seed) if args.seed is not None else int(cfg.public_sample.seed)
+        tmag_max = float(args.tmag_max) if args.tmag_max is not None else float(cfg.public_sample.tmag_max)
+        cone_radius_deg = (
+            float(args.cone_radius_deg) if args.cone_radius_deg is not None else float(cfg.public_sample.cone_radius_deg)
+        )
+        max_query_points = (
+            int(args.max_query_points) if args.max_query_points is not None else int(cfg.public_sample.max_query_points)
+        )
+
+        # Cache under data/catalogs so repeated runs are reproducible and cheaper.
+        cache_path = cfg.paths.data_dir / "catalogs" / f"tic_sample_n{n}_seed{seed}_tmag{tmag_max:.1f}.json"
+        sample = load_or_create_tic_sample(
+            cfg,
+            n=n,
+            seed=seed,
+            tmag_max=tmag_max,
+            cone_radius_deg=cone_radius_deg,
+            max_query_points=max_query_points,
+            cache_path=cache_path,
+        )
+
+        if args.tess_ingestion_mode:
+            cfg = cfg.model_copy(
+                update={"tess": cfg.tess.model_copy(update={"ingestion_mode": str(args.tess_ingestion_mode)})}
+            )
+
+        res = run_pipeline(
+            cfg,
+            mode="live",
+            tic_ids=sample.tic_ids,
+            coords=None,
+            max_targets=len(sample.tic_ids),
+            validate=cfg.validation.enabled,
+        )
+        payload = {"tic_sample": sample.__dict__, "pipeline": res}
+        print(json.dumps(payload, indent=2, default=str))
+        return
+
+    if args.cmd == "run-tess-product-sample":
+        from skyminer.ingestion.tess_product_sample import load_or_create_tess_product_sample
+
+        n = int(args.n)
+        seed = int(args.seed)
+        max_queries = int(args.max_queries)
+
+        cache_path = cfg.paths.data_dir / "catalogs" / f"tess_spoc_sample_n{n}_seed{seed}.json"
+        sample = load_or_create_tess_product_sample(
+            cfg, n=n, seed=seed, max_queries=max_queries, cache_path=cache_path
+        )
+
+        # Force SPOC ingestion for this command.
+        cfg = cfg.model_copy(update={"tess": cfg.tess.model_copy(update={"ingestion_mode": "spoc"})})
+        cfg = cfg.model_copy(update={"pipeline": cfg.pipeline.model_copy(update={"top_k_reports": int(args.top_k_reports)})})
+
+        res = run_pipeline(
+            cfg,
+            mode="live",
+            tic_ids=sample.tic_ids,
+            coords=None,
+            max_targets=len(sample.tic_ids),
+            validate=bool(args.validate) and cfg.validation.enabled,
+            report=int(args.top_k_reports) > 0,
+        )
+        payload = {"tess_spoc_sample": sample.__dict__, "pipeline": res}
         print(json.dumps(payload, indent=2, default=str))
         return
 

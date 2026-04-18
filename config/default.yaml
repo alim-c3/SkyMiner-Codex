@@ -33,6 +33,15 @@ tess:
   download_dir: "data/raw/tess_cache"
   # Maximum number of light curves to keep per target when multiple sectors are available
   max_lightcurves_per_target: 1
+  # How to ingest TESS data in live mode:
+  #   "spoc"            -> download existing SPOC light curve products (fast, limited coverage)
+  #   "tesscut"         -> generate light curves from FFIs via tesscut (broader coverage)
+  #   "spoc_then_tesscut" -> try SPOC first, fall back to tesscut if no product exists
+  ingestion_mode: "spoc"
+  tesscut_cutout_size: 10
+  tesscut_threshold_sigma: 3.0
+  tesscut_quality_bitmask: "default"
+  max_workers: 8
 
 pipeline:
   # Number of targets processed together in one anomaly-detection batch
@@ -112,9 +121,24 @@ reporting:
   include_periodogram: true
   # Maximum number of data points plotted in light curve figures (downsampled if exceeded)
   max_points_plot: 5000
+  # Keep the per-run HTML summary readable for large batches.
+  run_summary_max_interesting: 25
+  run_summary_max_rejected: 50
 
 recent_mast:
   # Operational definition of "last night": last N hours in UTC for MAST queries.
   hours: 24
   # Safety cap for how many TIC IDs we will attempt to ingest in one "last night" run.
   max_tic_ids: 500
+
+public_sample:
+  # How many TIC targets to sample for a broad public-data scan.
+  n_targets: 200
+  # Deterministic seed for reproducibility.
+  seed: 42
+  # Only consider TIC entries with TESS magnitude <= this value when present.
+  tmag_max: 12.0
+  # Cone radius (degrees) for each random sky point queried in the TIC catalog.
+  cone_radius_deg: 0.35
+  # Upper bound on how many random sky points we will query to reach n_targets.
+  max_query_points: 2000

@@ -185,6 +185,8 @@ def _render_html(
     min_score = float(cfg.detection.scoring.min_score_to_report)
     generated_at = datetime.now(timezone.utc).isoformat()
     scored = [c for c in candidates if c.score is not None]
+    max_interesting = int(getattr(cfg.reporting, "run_summary_max_interesting", 25))
+    max_rejected = int(getattr(cfg.reporting, "run_summary_max_rejected", 50))
 
     def file_link(p: Path | None, label: str) -> str:
         if p is None:
@@ -249,19 +251,43 @@ def _render_html(
     ranked_line = f"`{ranked_candidates_path}`" if ranked_candidates_path else "N/A"
 
     ranked_href = ranked_candidates_path.resolve().as_uri() if ranked_candidates_path else ""
+    def _score_key(c: Candidate) -> float:
+        return float(c.score.total) if c.score else 0.0
+
+    interesting_sorted = sorted(interesting, key=_score_key, reverse=True)
+    rejected_sorted = sorted(rejected, key=_score_key, reverse=True)
+
+    rejected_display = rejected_sorted[: max_rejected if max_rejected > 0 else len(rejected_sorted)]
+    interesting_display = interesting_sorted[: max_interesting if max_interesting > 0 else len(interesting_sorted)]
+
     rejected_items = (
         "".join(
             f"<li><code>{c.candidate_id}</code> - {_why_not_interesting_short(c, min_score=min_score)}</li>"
-            for c in rejected
+            for c in rejected_display
         )
-        if rejected
+        if rejected_display
         else "<li>None in this run.</li>"
     )
+
+    rejected_note = ""
+    if len(rejected_sorted) > len(rejected_display):
+        rejected_note = (
+            f"<p><span class='na'>Showing {len(rejected_display)} of {len(rejected_sorted)} rejected. "
+            "See the ranked JSON for the full list.</span></p>"
+        )
+
     interesting_blocks = (
-        "".join(candidate_block(c) for c in interesting)
-        if interesting
+        "".join(candidate_block(c) for c in interesting_display)
+        if interesting_display
         else "<p>None met the interesting threshold in this run.</p>"
     )
+
+    interesting_note = ""
+    if len(interesting_sorted) > len(interesting_display):
+        interesting_note = (
+            f"<p><span class='na'>Showing top {len(interesting_display)} of {len(interesting_sorted)} interesting. "
+            "See the ranked JSON for the full list.</span></p>"
+        )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -308,6 +334,7 @@ def _render_html(
 
   <h2>Not interesting (rejected)</h2>
   <p>Rejected means the candidate scored below the configured interesting threshold (score &lt; {min_score}).</p>
+  {rejected_note}
   <ul>
     {rejected_items}
   </ul>
@@ -317,6 +344,7 @@ def _render_html(
     "Interesting" means: score &ge; {min_score}. This is a prioritization rule, not a scientific confirmation.
     If a candidate is marked "no match" in catalogs, that only means "no obvious match found" in the catalogs queried by this run.
   </p>
+  {interesting_note}
   {interesting_blocks}
 
   <h2>Notes and cautions</h2>

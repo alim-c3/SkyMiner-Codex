@@ -11,6 +11,9 @@ __pycache__/
 # TESS light curve download cache (can be large)
 data/raw/tess_cache/
 
+# Cached catalog samples (reproducible but generated)
+data/catalogs/*.json
+
 # Pipeline outputs (regenerated on each run; keep the placeholder)
 outputs/
 !outputs/.gitkeep

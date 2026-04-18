@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "skyminer"
-version = "0.1.0"
+version = "1.0.0"
 description = "AI astronomy discovery pipeline for candidate variable star and stellar anomaly detection using public TESS data."
 readme = "README.md"
 license = { text = "MIT" }
