@@ -90,6 +90,12 @@ def main(argv: list[str] | None = None) -> None:
         help="How many top candidates to generate plots/reports for. Set 0 to disable.",
     )
 
+    p_dash = sub.add_parser("dashboard", help="Generate (or refresh) the local static dashboard HTML.")
+
+    p_email = sub.add_parser("prepare-email", help="Prepare an email draft + attachment packet for a run_id.")
+    p_email.add_argument("--run-id", required=True, help="Pipeline run id")
+    p_email.add_argument("--max-candidates", type=int, default=8, help="How many top candidates to include")
+
     args = parser.parse_args(argv)
     cfg = _load_config(Path(args.config))
 
@@ -266,6 +272,31 @@ def main(argv: list[str] | None = None) -> None:
         )
         payload = {"tess_spoc_sample": sample.__dict__, "pipeline": res}
         print(json.dumps(payload, indent=2, default=str))
+        return
+
+    if args.cmd == "dashboard":
+        from skyminer.reporting.dashboard import generate_dashboard
+
+        p = generate_dashboard(cfg)
+        print(json.dumps({"dashboard_path": str(p)}, indent=2))
+        return
+
+    if args.cmd == "prepare-email":
+        from skyminer.reporting.email_prep import prepare_email_packet
+
+        pkt = prepare_email_packet(cfg, run_id=str(args.run_id), max_candidates=int(args.max_candidates))
+        print(
+            json.dumps(
+                {
+                    "run_id": pkt.run_id,
+                    "out_dir": str(pkt.out_dir),
+                    "draft_txt": str(pkt.draft_txt),
+                    "recipients_md": str(pkt.recipients_md),
+                    "manifest_json": str(pkt.manifest_json),
+                },
+                indent=2,
+            )
+        )
         return
 
 

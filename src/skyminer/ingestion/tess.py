@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 
 from skyminer.config import SkyMinerConfig
 from skyminer.ingestion.base import BaseIngestor
@@ -10,6 +11,46 @@ from skyminer.models.schemas import LightCurve, SkyCoordLike
 from skyminer.utils.io import read_csv_lightcurve
 
 log = logging.getLogger(__name__)
+
+
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _try_time_to_iso(mjd_or_val: object) -> str | None:
+    """Convert a MAST/astropy time-like value into an ISO string when possible."""
+
+    try:
+        # Often an astropy Time, or a float MJD in table columns like t_obs_release.
+        from astropy.time import Time
+
+        v = mjd_or_val
+        if hasattr(v, "mjd"):
+            return Time(v.mjd, format="mjd").to_datetime(timezone=timezone.utc).isoformat()
+        if isinstance(v, (int, float)):
+            return Time(float(v), format="mjd").to_datetime(timezone=timezone.utc).isoformat()
+        # Some tables may give datetime-like strings; keep as-is.
+        s = str(v).strip()
+        return s if s else None
+    except Exception:
+        try:
+            s = str(mjd_or_val).strip()
+            return s if s else None
+        except Exception:
+            return None
+
+
+def _get_row_value(row: object, colnames: list[str], *candidates: str) -> object | None:
+    lower = {c.lower(): c for c in colnames}
+    for cand in candidates:
+        key = lower.get(cand.lower())
+        if not key:
+            continue
+        try:
+            return row[key]  # type: ignore[index]
+        except Exception:
+            continue
+    return None
 
 
 class TessIngestor(BaseIngestor):
@@ -103,6 +144,7 @@ class TessIngestor(BaseIngestor):
     def _ingest_with_lightkurve_tic(self, tic_ids: list[str]) -> list[LightCurve]:
         import numpy as np
         import lightkurve as lk
+        from astropy.time import Time
 
         out: list[LightCurve] = []
         for tic in tic_ids:
@@ -112,19 +154,42 @@ class TessIngestor(BaseIngestor):
                 if len(sr) == 0:
                     log.warning("No TESS lightcurves found for %s", target)
                     continue
-                lcfs = sr[: self.cfg.tess.max_lightcurves_per_target].download_all(
+                max_keep = int(self.cfg.tess.max_lightcurves_per_target)
+                subset = sr[:max_keep]
+                try:
+                    table = subset.table  # type: ignore[attr-defined]
+                except Exception:
+                    table = None
+
+                lcfs = subset.download_all(
                     download_dir=str(self.cfg.tess.download_dir), quality_bitmask="default"
                 )
                 if lcfs is None:
                     log.warning("Download returned None for %s", target)
                     continue
-                for lcf in lcfs:
+                for idx, lcf in enumerate(lcfs):
                     lc = lcf.PDCSAP_FLUX
                     t = np.asarray(lc.time.value, dtype=float).tolist()
                     y = np.asarray(lc.flux.value, dtype=float).tolist()
                     e = None
                     if getattr(lc, "flux_err", None) is not None:
                         e = np.asarray(lc.flux_err.value, dtype=float).tolist()
+
+                    # Best-effort provenance from the search table row.
+                    release_iso = None
+                    obs_id = None
+                    product = None
+                    if table is not None and idx < len(table):
+                        row = table[idx]
+                        colnames = list(getattr(table, "colnames", []) or [])
+                        obs_id = _get_row_value(row, colnames, "obs_id", "obsid")
+                        product = _get_row_value(row, colnames, "productFilename", "productfilename", "dataURI", "datauri")
+                        rel = _get_row_value(row, colnames, "t_obs_release", "tobsrelease", "t_obs_release_mjd")
+                        release_iso = _try_time_to_iso(rel)
+
+                    # Observation time span in BTJD days (for TESS).
+                    t_min = float(np.nanmin(np.asarray(t, dtype=float))) if t else None
+                    t_max = float(np.nanmax(np.asarray(t, dtype=float))) if t else None
 
                     meta: dict[str, Any] = {
                         "target": target,
@@ -135,6 +200,12 @@ class TessIngestor(BaseIngestor):
                         "mission": self.cfg.tess.mission,
                         "time_format": str(getattr(lc.time, "format", "")),
                         "time_scale": str(getattr(lc.time, "scale", "")),
+                        "downloaded_at_utc": _now_utc_iso(),
+                        "mast_obs_id": str(obs_id).strip() if obs_id is not None else None,
+                        "mast_product": str(product).strip() if product is not None else None,
+                        "mast_product_release_utc": release_iso,
+                        "btjd_min": t_min,
+                        "btjd_max": t_max,
                     }
 
                     coord = None
@@ -174,18 +245,40 @@ class TessIngestor(BaseIngestor):
                 if len(sr) == 0:
                     log.warning("No TESS lightcurves found for coord ra=%s dec=%s", ra, dec)
                     continue
-                lcfs = sr[: self.cfg.tess.max_lightcurves_per_target].download_all(
+                max_keep = int(self.cfg.tess.max_lightcurves_per_target)
+                subset = sr[:max_keep]
+                try:
+                    table = subset.table  # type: ignore[attr-defined]
+                except Exception:
+                    table = None
+
+                lcfs = subset.download_all(
                     download_dir=str(self.cfg.tess.download_dir), quality_bitmask="default"
                 )
                 if lcfs is None:
                     continue
-                for lcf in lcfs:
+                for idx, lcf in enumerate(lcfs):
                     lc = lcf.PDCSAP_FLUX
                     t = np.asarray(lc.time.value, dtype=float).tolist()
                     y = np.asarray(lc.flux.value, dtype=float).tolist()
                     e = None
                     if getattr(lc, "flux_err", None) is not None:
                         e = np.asarray(lc.flux_err.value, dtype=float).tolist()
+
+                    release_iso = None
+                    obs_id = None
+                    product = None
+                    if table is not None and idx < len(table):
+                        row = table[idx]
+                        colnames = list(getattr(table, "colnames", []) or [])
+                        obs_id = _get_row_value(row, colnames, "obs_id", "obsid")
+                        product = _get_row_value(row, colnames, "productFilename", "productfilename", "dataURI", "datauri")
+                        rel = _get_row_value(row, colnames, "t_obs_release", "tobsrelease", "t_obs_release_mjd")
+                        release_iso = _try_time_to_iso(rel)
+
+                    t_min = float(np.nanmin(np.asarray(t, dtype=float))) if t else None
+                    t_max = float(np.nanmax(np.asarray(t, dtype=float))) if t else None
+
                     out.append(
                         LightCurve(
                             source="tess",
@@ -194,7 +287,16 @@ class TessIngestor(BaseIngestor):
                             time=t,
                             flux=y,
                             flux_err=e,
-                            meta={"author": self.cfg.tess.author, "mission": self.cfg.tess.mission},
+                            meta={
+                                "author": self.cfg.tess.author,
+                                "mission": self.cfg.tess.mission,
+                                "downloaded_at_utc": _now_utc_iso(),
+                                "mast_obs_id": str(obs_id).strip() if obs_id is not None else None,
+                                "mast_product": str(product).strip() if product is not None else None,
+                                "mast_product_release_utc": release_iso,
+                                "btjd_min": t_min,
+                                "btjd_max": t_max,
+                            },
                         )
                     )
             except Exception as exc:
@@ -270,6 +372,7 @@ class TessIngestor(BaseIngestor):
                             "sector": getattr(tpf, "sector", None),
                             "author": "tesscut",
                             "mission": self.cfg.tess.mission,
+                            "generated_at_utc": _now_utc_iso(),
                         }
                         out.append(
                             LightCurve(

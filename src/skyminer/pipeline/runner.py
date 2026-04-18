@@ -121,6 +121,14 @@ def run_pipeline(
         artifacts=artifact_objs,
     )
 
+    # Generate/update the static dashboard (best-effort; never fail the pipeline for UI).
+    try:
+        from skyminer.reporting.dashboard import generate_dashboard
+
+        generate_dashboard(cfg)
+    except Exception:
+        pass
+
     return {
         "run_id": run.run_id,
         "mode": mode,
